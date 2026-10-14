@@ -373,6 +373,28 @@ Proxy-HK.SenflareLink.Kdns.fr,Proxy-TW.SenflareLink.Kdns.fr,Proxy-JP.SenflareLin
 - 访问 `https://你的域名/<你设置的login值>` 设置密码后直接进入面板
 - 订阅地址：`https://你的域名/<UUID>/sub`UUID可在面板设置中一键生成（下方「订阅地址」模块有各客户端一键复制链接）
 
+### 本 fork 的个人再混淆（`_worker.js`）
+
+仓库里的 `_worker.js` 是 **本 fork 用 Actions 从上游明文再混淆的个人产物**，不是上游的 `CFNext-混淆版.js`。工作流每天从 [PAICNI/CFNext](https://github.com/PAICNI/CFNext) 的 `main` 分支拉取 `CFNext-明文版.js`，存成 `origin.js`（`origin.js` 就是拉下来的明文），若仓库里已经有 `CFNext-明文版.js` 则一并覆盖成同一份。`CFNext-混淆版.js`、小说混淆版和 Pages 压缩包都原样保留。
+
+启用并跑一次：
+
+1. 本仓库 **Settings → Actions → General**
+2. **Workflow permissions** 选 **Read and write permissions**，保存（工作流里的 `contents: write` 依赖这项）
+3. 打开 **Actions → Obfuscate CFNext Worker → Run workflow**，手动跑一次
+4. 之后每天 **UTC 22:00（香港时间 06:00）** 自动拉取明文、混淆并提交 `origin.js` 与 `_worker.js`
+
+部署 `_worker.js`（模块 Worker，文件含 `export default`）：
+
+- **粘贴**：Cloudflare 控制台 → Workers → 新建 / 编辑 Worker，把 `_worker.js` 全文贴进编辑器后部署；环境变量 `login` 与 KV 绑定 `K` 与上面的 Worker 部署相同
+- **Wrangler**：在仓库根目录放一份只指向该文件的配置后执行 `npx wrangler deploy`
+
+```toml
+name = "cfnext"
+main = "_worker.js"
+compatibility_date = "2024-09-23"
+```
+
 ---
 
 ## 四、环境变量与配置变量

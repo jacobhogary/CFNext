@@ -1,0 +1,106 @@
+name: 🔐 Obfuscate CFNext Worker
+
+on:
+  schedule:
+    # 每天香港时间早上 6 点自动执行 (UTC 22:00)
+    - cron: "0 22 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  obfuscate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 🔧 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "latest"
+
+      - name: 📦 Install javascript-obfuscator
+        run: |
+          npm install -g javascript-obfuscator
+
+      - name: ⬇️ Download latest CFNext plain source
+        run: |
+          # origin.js is the pulled 明文. The Chinese filename is percent-encoded
+          # so curl does not depend on the runner locale.
+          # Human path: PAICNI/CFNext main / CFNext-明文版.js
+          curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 -o origin.js \
+            "https://raw.githubusercontent.com/PAICNI/CFNext/main/CFNext-%E6%98%8E%E6%96%87%E7%89%88.js"
+          if [ ! -s origin.js ]; then
+            echo "❌ origin.js is empty!"
+            exit 1
+          fi
+          if ! grep -q "export default" origin.js; then
+            echo "❌ origin.js does not look like the CFNext module worker"
+            exit 1
+          fi
+          echo "Downloaded origin.js ($(wc -c < origin.js) bytes)"
+          # Keep the checked-in 明文 in sync when this fork already has it.
+          # Do not create or delete other upstream files.
+          if [ -f "CFNext-明文版.js" ]; then
+            cp origin.js "CFNext-明文版.js"
+            echo "Synced CFNext-明文版.js with origin.js"
+          fi
+
+      - name: 🔐 Obfuscate worker code
+        run: |
+          # Same transforms as StartNight/edgetunnel-obfuscated, with two Workers constraints:
+          # rename-globals stays false (export default / bindings must keep their names)
+          # self-defending stays false (it breaks Workers)
+          # Dead-code threshold is 0.3 rather than StartNight's 0.4. On the current
+          # ~255KB 明文 that measured ~2.0MB at 0.4 and ~1.8MB at 0.3, inside the
+          # ~1–3MB practical Workers script size.
+          javascript-obfuscator origin.js --output _worker.js \
+            --compact true \
+            --control-flow-flattening true \
+            --control-flow-flattening-threshold 0.75 \
+            --dead-code-injection true \
+            --dead-code-injection-threshold 0.3 \
+            --identifier-names-generator hexadecimal \
+            --rename-globals false \
+            --self-defending false \
+            --string-array true \
+            --string-array-encoding 'rc4' \
+            --string-array-threshold 0.75 \
+            --transform-object-keys true \
+            --unicode-escape-sequence true \
+            --split-strings true \
+            --split-strings-chunk-length 5
+          echo "Obfuscated _worker.js ($(wc -c < _worker.js) bytes)"
+
+      - name: ✅ Verify output
+        run: |
+          if [ ! -s _worker.js ]; then
+            echo "❌ _worker.js is empty!"
+            exit 1
+          fi
+          if ! grep -q "export default" _worker.js; then
+            echo "❌ _worker.js is missing export default"
+            exit 1
+          fi
+          bytes=$(wc -c < _worker.js)
+          echo "✅ Obfuscation successful (${bytes} bytes)"
+          if [ "$bytes" -gt 3145728 ]; then
+            echo "::warning::_worker.js is ${bytes} bytes, above the ~3MB practical Workers size"
+          fi
+
+      - name: 📝 Commit obfuscated code
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          branch: main
+          commit_message: "🔐 Auto-obfuscate: update CFNext worker [skip ci]"
+          commit_author: "github-actions[bot] <github-actions[bot]@users.noreply.github.com>"
+          file_pattern: |
+            _worker.js
+            origin.js
+            CFNext-明文版.js
+          push_options: "--force-with-lease"
